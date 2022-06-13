@@ -1,0 +1,303 @@
+---
+title: "MovieLens Project"
+author: "Mahaman Sani SAHIROU ADAMOU"
+date: "2022-06-13"
+header-includes:
+  - \usepackage{longtable} \usepackage[nottoc]{tocbibind}
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    highlight: pygments
+    keep_tex: true
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = 'center', cache=FALSE, cache.lazy = FALSE)
+
+## Source main R processing script
+source("MovieLens.R")
+```
+
+
+\newpage
+
+
+# Introduction
+
+The purpose of this project is to create a **movie recommendation system** using the MovieLens dataset. This involve building a model that predicts the rating of a movie from known informations (**predictors** or **independent variables**). We will use a light ten(10) millions ratings version of the MovieLens dataset to make the computation a little easier. This light dataset is produced by a piece of code provided by **EDX**. We will first look at the structure of the data, visualize it and then progressively build a model that will reach a targeted accuracy.  
+
+
+Diffrent models will be **trained** on a nine(9) millions ratings set and evaluated on a one(1) million ratings set, the **validation** set, based on the **RMSE (Root Mean Squared Error)**. Finally, the best model will be chosen.   
+
+
+
+
+# Analysis 
+
+## Brief overview of the dataset  
+
+The code chunc provided by EDX generate a 9 millions rows training set and 1 million rows validation set, both sets of 6 variables.  
+
+
+- **userId** ```<integer>``` : unique identification number for the user,  
+- **movieId** ```<numeric>```  : unique identification number for the movie,  
+- **rating** ```<numeric>``` : 5-stars rating grade given by a user to a movie,  
+- **timestamp** ```<integer>``` : date and time the rating was given to a movie by a user,  
+- **title** ```<character>``` : movie title (not unique), also contains the year the movie was released,  
+- **genres** ```<character>``` : genres associated with the movie, pipe-separated values.    
+
+
+```{r initial_training_set_glimpse}
+## initial edx training set glimpse
+print_tab_data(initial_edx_training_set_piece)
+```
+     
+**«rating»** is the **dependent variable** that will be estimated by our models. The **5** remaning variables are **independent variables** or **predictors**.      
+     
+
+`r check_na_message`   
+
+`r zero_star_rating_message`  
+
+
+\newpage
+
+
+## Further data preparation  
+
+We see through the table attached to the paragraph above that:     
+
+- in addition to the title of the movie, the **title** variable also contains the movie year of realease that can be useful for the model. These two pieces of information should be separated,    
+- **genres** are a pipe-separated list of values that should also be separated,     
+- we can extract more readable an useful informations (**year** and **month**) from the **timestamp** variable.   
+
+
+After these transformations, we end up with *longer* and litle *wider* *training* and *validation* sets:    
+
+
+```{r final_training_set_glimpse, echo=FALSE}
+print_tab_data(head(edx))
+```
+    
+We can see that in the training set, **`r edx %>% select(userId) %>% distinct() %>% nrow()`** distinct users rated **`r edx %>% select(movieId) %>% distinct() %>% nrow()`** distinct movies, that theoretically corresponds to more than **`r round((edx %>% select(userId) %>% distinct() %>% nrow()) * (edx %>% select(movieId) %>% distinct() %>% nrow()) / 10^6)`** millions possible combinations (versus 10 millions rows in the training set), so, not every user has rated every movie.
+
+
+
+## Exploratory data analysis   
+
+### Overview   
+
+
+```{r overview_ratings_distribution, echo=FALSE}
+overview_ratings_distribution_gg
+```
+
+**half-star** ratings (0.5, 1.5, 2.5, 3.5 and 4.5) are less common (**`r sprintf("%0.2f%%", half_star_rating$half_star_rating * 100)`** of ratings in the training set) than **full-star** ratings (1, 2, 3, 4 and 5).   
+
+The ratings distribution is left-skewed : we have more positive ratings: **`r sprintf("%0.2f%%", positive_rating$positive_rating * 100)`** of ratings in the training set are above 2.5 on a 5 stars rating scale. This is probably due to the fact that users are more likely to give a rating when they already wached and liked the movie.  
+
+
+
+### Ratings distribution per Genre  
+
+
+```{r ratings_distibution_per_genre, echo=FALSE}
+ratings_distibution_per_genre_gg
+```
+
+The **genre** variable contains **`r edx %>% select(genre) %>% distinct() %>% nrow()`** distinct values of genres movies are characterized in. The most popular rated genre types are **`r most_rated_genres$genre[1]`** and **`r most_rated_genres$genre[2]`**. 
+
+
+
+```{r movie_rating_by_genre, echo=FALSE}
+rating_by_genre_gg
+```
+   
+From the graph above, we can see that the ratings appear to be different between genres. **`r better_rated_genres$genre[1]`** and **`r better_rated_genres$genre[2]`** are some of the better rated genre types, while **`r better_rated_genres$genre[nrow(better_rated_genres)-1]`** and **`r better_rated_genres$genre[nrow(better_rated_genres)]`** are some of the worst rated.   
+
+   
+
+
+### Ratings distribution per Movie     
+
+```{r ratings_distibution_per_movie, echo=FALSE}
+ratings_distibution_per_movie_gg
+```
+   
+The number of ratings clearly varies from one movie to another. 
+
+```{r top_50_rated_movies, echo=FALSE}
+top_50_rated_movies_gg
+```
+
+**Top 50** movies cumulate up to `r sprintf("%0.2f%%", top_50_rated_movies$top50 * 100)` of the ratings in the training set.   
+
+
+
+### Ratings distribution per User       
+
+```{r ratings_distibution_per_user, echo=FALSE}
+ratings_distibution_per_user_gg
+```
+   
+The number of ratings varies too from one user to another.   
+
+
+
+### Ratings distribution per Month/Year of rating     
+
+```{r ratings_distribution_per_month, echo=FALSE}
+ratings_distribution_per_month_gg
+```
+   
+
+```{r ratings_distribution_per_year, echo=FALSE}
+ratings_distribution_per_year_gg
+```
+
+
+## Model building & evaluation   
+
+Several models will be assessed starting with the simplest. Accuracy will be evaluated using the residual mean squared error, **RMSE**. The RMSE is the error function that will measure accuracy and quantify the typical error we make when predicting the movie rating. 
+
+***   
+
+```{r rmse_code, echo=TRUE, include=TRUE}
+RMSE <- function(true_ratings, predicted_ratings) {
+  sqrt(mean((true_ratings - predicted_ratings)^2, na.rm = TRUE))
+}
+```
+
+***   
+
+For this case, **RMSE** value larger than **1** means that our typical error is larger than **one star**. The goal is to reduce this error below **0.8649**. Accuracies will be compared across different models.  
+
+
+### Naive Mean-Baseline Model    
+
+We first started with the simplest approach we could take in making a prediction by only using the average of all movie ratings. This model is a baseline that predicts the same rating regardless of the independent variables and would look like this:
+
+$$Y_{u,i} = \hat{\mu} + \varepsilon_{u,i}$$   
+
+Where:  
+
+- **u** is the index for users, and **i** for movies,   
+- $\hat{\mu}$ is the mean,   
+- $\varepsilon_{i,u}$ is the independent errors sampled from the same distribution centered at 0.  
+
+
+The **mean** is approximately **`r round(mu_hat, 4)`** and the **RMSE** on the validation set is **`r round(rmse_mean_baseline_model_result, 4)`**, which is very far from the target RMSE and indicates poor performance for the model.   
+
+
+### Mean + Movie Effect Model   
+
+Our previous first model can be improved on by taking into account **movie bias**. Some movies are more popular than others and receive higher ratings. We can add the term $b_i$ to reflect this **movie effect**.     
+
+$$Y_{u,i} = \hat{\mu} + b_i + \epsilon_{u,i}$$  
+
+Where:  
+
+- $\hat{\mu}$ is the mean,   
+- $b_i$ is the bias of movie $i$, the average of $Y_{u,i}$ - $\hat{\mu}$ for each movie $i$.   
+- $\varepsilon_{i,u}$ is the independent errors sampled from the same distribution centered at 0. 
+
+
+The RMSE on the **validation** dataset is improved to **`r round(rmse_mean_movie_model_result, 4)`**, that is better than the **Naive Mean-Baseline Model**, but it is also far from the desired RMSE.
+
+
+### Mean + Movie + User Effects Model  
+
+Bias can be found in users as well. So, the **Mean + Movie + User Effects Model** consider that the users have different tastes and rate movies differently.
+
+$$Y_{u,i} = \hat{\mu} + b_i + b_u + \epsilon_{u,i}$$
+
+
+Where:  
+
+- $\hat{\mu}$ is the mean,   
+- $b_i$ is the bias of movie $i$,      
+- $b_u$ is the bias of user $u$,   
+- $\varepsilon_{i,u}$ is the independent errors sampled from the same distribution centered at 0. 
+
+
+The RMSE on the **validation** dataset is improved to **`r round(rmse_mean_movie_user_model_result, 4)`** that reaches the minimum performance desired. We can still hope for better results by applying the regularization techniques.
+
+
+### Mean + Movie + User + Genre Effetcs Model  
+
+Bias can also be found in movie genre as well. We can add this effect to the model as $b_{u,g}$.  
+
+
+$$Y_{u,i} = \hat{\mu} + b_i + b_u + b_{u,g} + \epsilon_{u,i}$$
+
+Where:  
+
+- $\hat{\mu}$ is the mean,   
+- $b_i$ is the bias of movie $i$,      
+- $b_u$ is the bias of user $u$,   
+- $b_{u,g}$ is the bias of movie genre, a measure for how much a user $u$ likes the genre $g$,  
+- $\varepsilon_{i,u}$ is the independent errors sampled from the same distribution centered at 0. 
+
+
+The RMSE on the **validation** dataset is improved to **`r round(rmse_mean_movie_user_model_result, 4)`** that also reaches the minimum performance desired and still better. We can still hope for better results by applying the regularization techniques.
+
+
+
+## Regularization
+
+The regularization method allows us to add a penalty $\lambda$ (lambda) to penalize movies with large estimates from a small sample size. 
+
+
+### Regularized Mean + Movie Effect Model   
+
+```{r regularized_mean_movie_model, echo=FALSE}
+regularized_mean_movie_model_gg
+```
+  
+  
+The **RMSE** on the **validation** dataset is **`r round(rmse_regularized_mean_movie_model_result, 4)`** which is a little better than that of the **Mean + Movie Effect Model**.
+
+
+
+### Regularized Mean + Movie + User Effects Model  
+
+```{r regularized_mean_movie_user_model, echo=FALSE}
+regularized_mean_movie_user_model_gg
+```
+
+The **RMSE** on the **validation** dataset is **`r round(rmse_regularized_mean_movie_user_model_result, 4)`** which is a little better than that of the **Mean + Movie + User Effects Model**.
+
+
+
+### Regularized Mean + Movie + User + Genre Effetcs Model
+
+```{r regularized_mean_movie_user_genre_model, echo=FALSE}
+regularized_mean_movie_user_genre_model_gg
+```
+
+The **RMSE** on the **validation** dataset is **`r round(rmse_regularized_mean_movie_user_genre_model_result, 4)`** which is a little better than that of the **Mean + Movie + User + Genre Effetcs Model** and also the best result over all built models.
+
+
+
+\newpage
+
+
+# Results   
+
+To create our movie recommendation system, we buid different models considering the effects of movies, users and genres. Movies have more effects by decreasing the RMSE the most, suggesting that the movie in itself is of greatest importance to explain the rating. **Regularized Mean + Movie + User + Genre Effetcs Model** is the best off all models, achieving an RMSE of **`r round(rmse_regularized_mean_movie_user_genre_model_result, 4)`**.
+
+```{r final_results, echo=FALSE}
+print_tab_data(results)
+```
+
+# Conclusion
+
+We buid different models considering the effects of movies, users and genres, an applying regularization. Finally, it was possible to reach a **RMSE** of **`r round(rmse_regularized_mean_movie_user_genre_model_result, 4)`** which responds well enough to the expectations of our project.
+
+It would have been interesting to have more predictors, informations about the users and the movies that could have made it possible to build better models.
+
+
+
